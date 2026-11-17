@@ -54,6 +54,33 @@ def test_cann_accuracy_failure_has_no_timing():
     assert "swi_glu_2" in result["correctness"]["error"]
 
 
+def test_full_report_must_cover_declared_cases_even_with_consistent_counters():
+    report = _report()
+    report["operators"][0].update(cases=report["operators"][0]["cases"][:1],
+                                  total_cases=1, passed_cases=1)
+    result = _adapter().report_to_eval(report, config={"cases": ["swi_glu_1", "swi_glu_2"]})
+    assert not result["correctness"]["pass"]
+    assert not result["performance"]
+    assert "absent" in result["correctness"]["error"]
+
+
+def test_duplicate_cases_cannot_replace_missing_case():
+    report = _report()
+    report["operators"][0]["cases"][1]["case_id"] = "level1/swi_glu_1"
+    result = _adapter().report_to_eval(report, config={"cases": ["swi_glu_1", "swi_glu_2"]})
+    assert not result["correctness"]["pass"]
+    assert "duplicate" in result["correctness"]["error"]
+    assert not result["performance"]
+
+
+def test_full_report_accepts_reordered_cases_and_rejects_wrong_operator():
+    report = _report()
+    config = {"cases": ["swi_glu_2", "swi_glu_1"], "operator": "SwiGlu"}
+    assert _adapter().report_to_eval(report, config=config)["correctness"]["pass"]
+    config["operator"] = "Exp"
+    assert not _adapter().report_to_eval(report, config=config)["correctness"]["pass"]
+
+
 def test_pypto_language_kb_and_provenance_routing():
     assert lang_mode.mode_of("pypto") == lang_mode.MODE_PYPTO
     assert lang_mode.is_pypto("pypto")

@@ -55,6 +55,8 @@ for case in doc["cases"]:
     cases.append({"case_id": f"{rel}_{number}", "status": "success",
                   "elapsed_us": 100.0 + number, "accuracy": {"passed": True},
                   "op_times": {"trace_view": {"aicore_e2e": 100.0 + number}}})
+if os.environ.get("FAKE_EVAL_PARTIAL"):
+    cases = cases[:1]
 if os.environ.get("FAKE_EVAL_EXTRA"):
     cases.append({"case_id": f"{rel}_2", "status": "success", "elapsed_us": 102.0,
                   "accuracy": {"passed": True},
@@ -314,6 +316,15 @@ def test_a_narrowed_job_that_evaluates_more_cases_fails_closed(tmp_path, cann_tr
     with pytest.raises(RuntimeError, match="wrong case set"):
         _run_adapter(tmp_path, cann_tree, monkeypatch, cases="gqa_1,gqa_5",
                      extra_env={"FAKE_EVAL_EXTRA": "1"})
+
+
+@pytest.mark.parametrize("extra_env", [{"FAKE_EVAL_PARTIAL": "1"}, {"FAKE_EVAL_EXTRA": "1"}])
+def test_full_job_rejects_partial_or_duplicate_reports(tmp_path, cann_tree, monkeypatch, extra_env):
+    _, result, _, _ = _run_adapter(tmp_path, cann_tree, monkeypatch, extra_env=extra_env)
+    ev = parse_eval("=== JSON ===\n" + json.dumps(result))
+    assert not ev.correctness
+    assert ev.device_median_ms is None
+    assert not result["performance"]
 
 
 # --- a stalled evaluator keeps its evidence ---------------------------------------

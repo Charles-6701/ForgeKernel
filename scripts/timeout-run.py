@@ -37,10 +37,14 @@ def main() -> int:
         try:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
+            pass
+        # The leader may exit while a tool ignores the forwarded signal. Its
+        # exit does not mean the process group is empty.
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        proc.wait()
         sys.exit(128 + signum)
 
     for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):

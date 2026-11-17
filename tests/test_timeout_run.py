@@ -31,3 +31,44 @@ def test_timeout_run_still_bounds_the_child(tmp_path):
     proc = subprocess.run([sys.executable, str(HELPER), "1", sys.executable, "-c",
                            "import time; time.sleep(30)"], timeout=30)
     assert proc.returncode == 124
+
+
+def test_termination_kills_stubborn_descendant_after_leader_exits(tmp_path):
+    import pytest
+    ready = tmp_path / "descendant.pid"
+    child = tmp_path / "stubborn.py"
+    child.write_text("import os, signal, time\nfrom pathlib import Path\n"
+                     "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                     f"Path({str(ready)!r}).write_text(str(os.getpid()))\n"
+                     "time.sleep(60)\n")
+    parent = tmp_path / "parent.py"
+    parent.write_text("import subprocess, sys, time\n"
+                      f"subprocess.Popen([sys.executable, {str(child)!r}])\n"
+                      "time.sleep(60)\n")
+    proc = subprocess.Popen([sys.executable, str(HELPER), "60", sys.executable, str(parent)])
+    pid = None
+    try:
+        deadline = time.monotonic() + 5
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        pid = int(ready.read_text())
+        proc.terminate()
+        assert proc.wait(timeout=15) == 143
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.02)
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+    finally:
+        if pid:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()

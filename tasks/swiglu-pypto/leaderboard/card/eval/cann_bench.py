@@ -124,7 +124,9 @@ def report_to_eval(report: dict, *, config: dict | None = None) -> dict:
         "comparison": "benchmark baseline and hardware bound; NOT campaign reference",
         "timing_basis": basis,
     }
-    failures = []
+    failures = scope_violations(report, config["cases"]) if config.get("cases") else []
+    if config.get("operator") and op.get("operator") != config["operator"]:
+        failures.append(f"expected operator {config['operator']!r}, got {op.get('operator')!r}")
     for case in cases:
         accuracy = case.get("accuracy") or {}
         if case.get("status") != "success" or not accuracy.get("passed", False):
@@ -340,15 +342,19 @@ def scope_violations(report: dict, names: list[str]) -> list[str]:
     """Cases the report evaluated that the request did not (or the other way round)."""
     operators = report.get("operators") or []
     cases = (operators[0].get("cases") if operators else []) or []
-    reported, unparsed = set(), []
+    reported, unparsed, duplicates = set(), [], []
     for case in cases:
         number = _case_number(str(case.get("case_id") or ""))
         if number is None:
             unparsed.append(str(case.get("case_id")))
         else:
+            if number in reported:
+                duplicates.append(number)
             reported.add(number)
     wanted = {n for n in (_case_number(name) for name in names) if n is not None}
     problems = []
+    if duplicates:
+        problems.append(f"duplicate case number(s) {sorted(set(duplicates))} in report")
     if unparsed:
         problems.append(f"case(s) {unparsed} carry no case number")
     if missing := sorted(wanted - reported):
@@ -697,7 +703,10 @@ def _evaluate(workspace: Path, config: dict) -> dict:
         # price anything against a scope that did not happen.
         raise RuntimeError("narrowed job evaluated the wrong case set: "
                            + "; ".join(problems))
-    result = report_to_eval(report, config=config)
+    # A scout is checked against its selected set; a gate against the complete
+    # task declaration. Never infer completeness from the report's own counters.
+    result = report_to_eval(report, config={**config, **(
+        {"cases": selection.names} if selection.scope else {})})
     artifacts = [emit_artifact("cann/official_report.json", raw),
                  emit_artifact("cann/evaluator.log",
                                (reports / "evaluator.log").read_bytes()[-1048576:])]
