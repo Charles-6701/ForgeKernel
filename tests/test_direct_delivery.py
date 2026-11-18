@@ -275,6 +275,8 @@ def test_submit_status_logs_route_through_the_job_files(tmp_path, monkeypatch, c
     job = out.split("job=")[1].split()[0]
     assert submit_cli.main(["op", "status", job, "--base-dir", str(tmp_path)]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == ds.STATUS_SUCCEEDED
+    assert submit_cli.main(["op", "wait", job, "--base-dir", str(tmp_path)]) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == ds.STATUS_SUCCEEDED
     assert submit_cli.main(["op", "logs", job, "--base-dir", str(tmp_path)]) == 0
     assert "task=perf finished" in capsys.readouterr().out.splitlines()
     assert cfg.delivery == "local"
@@ -284,3 +286,64 @@ def test_submit_dry_run_says_where_it_would_run(tmp_path, capsys):
     _op(tmp_path)
     assert submit_cli.main(["op", "submit", "--dry-run", "--base-dir", str(tmp_path)]) == 0
     assert "local delivery: would run gpu_entry all" in capsys.readouterr().out
+
+
+def test_wait_job_blocks_locally_and_emits_only_sparse_heartbeats(tmp_path, monkeypatch):
+    op = _op(tmp_path)
+    states = iter([
+        {"id": 7, "status": ds.STATUS_RUNNING},
+        {"id": 7, "status": ds.STATUS_RUNNING},
+        {"id": 7, "status": ds.STATUS_RUNNING},
+        {"id": 7, "status": ds.STATUS_SUCCEEDED},
+    ])
+    monkeypatch.setattr(ds, "job_status", lambda *_: next(states))
+    clock = {"now": 0.0}
+    beats = []
+
+    def sleep(seconds):
+        clock["now"] += seconds
+
+    result = ds.wait_job(
+        op, "7", timeout_s=20, check_s=2, heartbeat_s=3,
+        on_heartbeat=lambda status, elapsed: beats.append((status["status"], elapsed)),
+        monotonic=lambda: clock["now"], sleep=sleep)
+    assert result["status"] == ds.STATUS_SUCCEEDED
+    # Three local checks, but only one externally visible progress event.
+    assert beats == [(ds.STATUS_RUNNING, 4.0)]
+
+
+def test_wait_job_has_a_bounded_deadline(tmp_path, monkeypatch):
+    op = _op(tmp_path)
+    monkeypatch.setattr(
+        ds, "job_status", lambda *_: {"id": 8, "status": ds.STATUS_RUNNING})
+    clock = {"now": 0.0}
+
+    def sleep(seconds):
+        clock["now"] += seconds
+
+    with pytest.raises(TimeoutError, match="job 8"):
+        ds.wait_job(op, "8", timeout_s=5, check_s=2,
+                    monotonic=lambda: clock["now"], sleep=sleep)
+
+
+def test_wait_job_returns_lost_for_a_disappeared_runner(tmp_path):
+    op = _op(tmp_path)
+    (op / ".jobs" / "9").mkdir(parents=True)
+    (op / ".jobs" / "9" / "runner.pid").write_text("999999999")
+    assert ds.wait_job(op, "9", timeout_s=1)["status"] == ds.STATUS_LOST
+
+
+def test_wait_cli_keeps_heartbeats_off_stdout(tmp_path, monkeypatch, capsys):
+    op = _op(tmp_path)
+    (op / ".jobs" / "10").mkdir(parents=True)
+
+    def wait(*args, on_heartbeat=None, **kwargs):
+        on_heartbeat({"id": 10, "status": ds.STATUS_RUNNING}, 600.0)
+        return {"id": 10, "status": ds.STATUS_SUCCEEDED}
+
+    monkeypatch.setattr(ds, "wait_job", wait)
+    assert submit_cli.main([
+        "op", "wait", "10", "--base-dir", str(tmp_path)]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {"id": 10, "status": ds.STATUS_SUCCEEDED}
+    assert "still Running after 600s" in captured.err

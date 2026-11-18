@@ -85,7 +85,8 @@ from forgekernel import arch as arch_mod
 from forgekernel.paths import operators_dir
 from forgekernel.submit.jobs import (STATUS_LOST, STATUS_RUNNING,
                                      STATUS_SUCCEEDED, TRANSPORT_ERROR_MARKER,
-                                     clock_lock_refusal, is_job, job_log, job_status)
+                                     clock_lock_refusal, is_job, job_log, job_status,
+                                     wait_job)
 
 # The run's outcome as the loop ends it (``stop``: target, meta_budget, infeasible, ...),
 # beside the operator tree; `forge run` reads it for its exit code.
@@ -280,7 +281,8 @@ class RealBackend:
                  poll_timeout_s: float = 14400.0, lost_retries: int = 3,
                  api_outage_retries: int = 30, api_outage_sleep_cap: float = 600.0,
                  teacher_agent_cmd: str | None = None,
-                 agent_policy: AgentPolicy | None = None):
+                 agent_policy: AgentPolicy | None = None,
+                 job_heartbeat_s: float = 600.0):
         self.op = op
         self.workspace = workspace
         self.agent_cmd = agent_cmd
@@ -293,9 +295,11 @@ class RealBackend:
         self.teacher_agent_cmd = teacher_agent_cmd
         self.git_name = git_name
         self.git_email = git_email
-        # A job's status and log are files its runner writes (forgekernel.submit.jobs),
-        # so a poll costs a file read.
+        # A job's status and log are files its runner writes (forgekernel.submit.jobs).
+        # wait_job blocks on that durable local state; check_s is internal and never
+        # turns into model-side/tool-side status traffic.
         self.poll_s = poll_s
+        self.job_heartbeat_s = job_heartbeat_s
         self.agent_retries = agent_retries
         self.agent_retry_sleep = agent_retry_sleep
         # How often a turn in progress says so: a teacher turn legitimately runs for
@@ -488,9 +492,7 @@ class RealBackend:
             # in every gate it anchors); it is not recoverable from the logs this returns
             self.last_job_id = job
             self.last_mode = mode
-            status = poll_until_terminal(
-                lambda: self._job_status(job), job, poll_s=self.poll_s,
-                timeout_s=self.poll_timeout_s, now=time.time, sleep=time.sleep)
+            status = self._wait_for_job(job, mode)
             if status in _LOST:
                 self._clear_inflight()  # a lost job is gone; never re-adopt it
                 lost += 1
@@ -524,6 +526,33 @@ class RealBackend:
             if op_dir is not None:
                 archive_job_artifacts(log, op_dir / ".jobs" / str(job) / "artifacts")
             return log
+
+    def _wait_for_job(self, job: str, mode: str) -> str:
+        """Wait once for a job completion signal, with a sparse run-log heartbeat.
+
+        Real submit jobs always have a local ``.jobs/<id>`` directory even when the
+        payload runs over SSH.  Using its atomic ``result.json`` as the signal keeps
+        probe, scout, gates and confirmations on the same event-driven path.  The
+        status-function fallback preserves compatibility with external/fake submit
+        backends that do not expose that directory.
+        """
+        op_dir = self._op_dir()
+        if op_dir is not None and is_job(op_dir, job):
+            def heartbeat(status, elapsed):
+                print(f"[loop] job {job} ({mode}) still {status.get('status')} on "
+                      f"{self.last_cluster or 'the GPU'} after {elapsed:.0f}s", flush=True)
+            try:
+                result = wait_job(
+                    op_dir, job, timeout_s=self.poll_timeout_s,
+                    check_s=max(0.05, float(self.poll_s)),
+                    heartbeat_s=max(0.0, float(self.job_heartbeat_s)),
+                    on_heartbeat=heartbeat)
+            except TimeoutError as exc:
+                raise BackendError(str(exc)) from exc
+            return str(result.get("status") or "")
+        return poll_until_terminal(
+            lambda: self._job_status(job), job, poll_s=self.poll_s,
+            timeout_s=self.poll_timeout_s, now=time.time, sleep=time.sleep)
 
     def _op_dir(self) -> Path | None:
         try:

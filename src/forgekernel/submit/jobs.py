@@ -145,6 +145,44 @@ def job_status(op_dir: Path, job_id: str) -> dict:
     return {"id": int(job_id), "status": STATUS_LOST}
 
 
+def wait_job(op_dir: Path, job_id: str, *, timeout_s: float,
+             check_s: float = 1.0, heartbeat_s: float = 0.0,
+             on_heartbeat=None, monotonic=time.monotonic, sleep=time.sleep) -> dict:
+    """Block locally until a detached job writes its terminal verdict.
+
+    The durable completion signal is ``result.json``.  Waiting here keeps the
+    submitter/model out of a status-query loop: the only repeated work is a cheap
+    local file/process check inside this process.  ``heartbeat_s`` is optional and
+    deliberately independent of ``check_s`` so a long JIT can remain observable
+    without emitting every check.  Injected clock/sleep make the deadline testable.
+
+    ``Lost`` is terminal too: the runner disappeared without producing a verdict and
+    the caller decides whether to resubmit it.
+    """
+    if timeout_s < 0:
+        raise ValueError("timeout_s must be non-negative")
+    if check_s <= 0:
+        raise ValueError("check_s must be positive")
+    started = monotonic()
+    deadline = started + timeout_s
+    next_heartbeat = (started + heartbeat_s) if heartbeat_s > 0 else None
+    while True:
+        status = job_status(op_dir, job_id)
+        if status.get("status") != STATUS_RUNNING:
+            return status
+        now = monotonic()
+        if now >= deadline:
+            raise TimeoutError(
+                f"job {job_id} did not reach a terminal state within {timeout_s:.0f}s "
+                f"(last status={status.get('status')!r})")
+        if next_heartbeat is not None and now >= next_heartbeat:
+            if on_heartbeat is not None:
+                on_heartbeat(status, now - started)
+            # Skip missed intervals after a delayed wake instead of printing a burst.
+            next_heartbeat = now + heartbeat_s
+        sleep(min(max(0.0, check_s), max(0.0, deadline - now)))
+
+
 def job_log(op_dir: Path, job_id: str) -> str:
     try:
         return log_path(op_dir, job_id).read_text(encoding="utf-8", errors="replace")

@@ -323,6 +323,16 @@ def test_a_jobs_status_and_log_are_read_from_its_files(monkeypatch, tmp_path):
     assert "PRICE-OK" in be.reread_log("77")
 
 
+def test_real_job_wait_uses_the_local_completion_signal(monkeypatch, tmp_path):
+    from forgekernel.loop import cli
+    _job_tree(tmp_path, monkeypatch, log="done\n", status="Succeeded")
+    monkeypatch.setattr(
+        cli, "poll_until_terminal",
+        lambda *a, **k: pytest.fail("a real job must not use model-side polling"))
+    be = cli.RealBackend("demo", tmp_path, None, "n", "e", poll_s=0.0)
+    assert be._wait_for_job("77", "scout") == "Succeeded"
+
+
 def test_succeeded_job_with_no_log_raises_instead_of_blaming_the_agent(monkeypatch, tmp_path):
     from forgekernel.loop import cli
     _job_tree(tmp_path, monkeypatch, log=None, status="Succeeded")

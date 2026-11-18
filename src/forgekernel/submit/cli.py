@@ -3,6 +3,7 @@
     python -m forgekernel.submit <op> submit --mode all [--branch <b>]
     python -m forgekernel.submit <op> submit --mode "cmd:nvidia-smi"   # smoke
     python -m forgekernel.submit <op> status <job_id>
+    python -m forgekernel.submit <op> wait   <job_id> [--timeout 14400]
     python -m forgekernel.submit <op> logs   <job_id>
     python -m forgekernel.submit <op> stop   <job_id>
 
@@ -30,12 +31,16 @@ def _die(msg: str):
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="forgekernel.submit")
     p.add_argument("op", help="operator name under operators/")
-    p.add_argument("action", choices=["submit", "status", "logs", "stop", "_run"])
+    p.add_argument("action", choices=["submit", "status", "wait", "logs", "stop", "_run"])
     p.add_argument("job_id", nargs="?", help="the job id (status / logs / stop)")
     p.add_argument("--mode", default="all", help="gpu_entry mode, or 'cmd:<command>'")
     p.add_argument("--branch", default=None, help="the branch to run (default: the tree's)")
     p.add_argument("--dry-run", action="store_true", help="say what would run, run nothing")
     p.add_argument("--base-dir", default=None, help="the directory holding operators/")
+    p.add_argument("--timeout", type=float, default=14400.0,
+                   help="seconds wait may block before failing (wait only)")
+    p.add_argument("--heartbeat", type=float, default=600.0,
+                   help="seconds between wait heartbeats on stderr; 0 disables")
     args = p.parse_args(argv)
 
     cfg = load_config(args.op, base_dir=args.base_dir)
@@ -60,6 +65,20 @@ def main(argv: list[str] | None = None) -> int:
         _die(f"no job {job} under {jobs.jobs_dir(op_dir)}")
     if args.action == "status":
         print(json.dumps(jobs.job_status(op_dir, job)))
+        return 0
+    if args.action == "wait":
+        def heartbeat(status, elapsed):
+            sys.stderr.write(
+                f"[submit] job {job} still {status.get('status')} "
+                f"after {elapsed:.0f}s\n")
+            sys.stderr.flush()
+        try:
+            status = jobs.wait_job(
+                op_dir, job, timeout_s=args.timeout,
+                heartbeat_s=max(0.0, args.heartbeat), on_heartbeat=heartbeat)
+        except TimeoutError as exc:
+            _die(str(exc))
+        print(json.dumps(status))
         return 0
     if args.action == "logs":
         sys.stdout.write(jobs.job_log(op_dir, job))

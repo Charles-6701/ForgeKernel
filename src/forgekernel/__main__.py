@@ -33,7 +33,9 @@ to configure one.
   forge <op> leaderboard show|export   -> the card's problem / the board's solution JSON
   forge <op> monitor [--sha ...]       -> correctness monitor: the card's own check under
                                           stressed inputs + kernel-output watch (advisory)
-  forge <op> submit|status|logs|stop   -> GPU-job harness (forgekernel.submit)
+  forge <op> submit|status|wait|logs|stop
+                                      -> GPU-job harness (forgekernel.submit); wait blocks
+                                         locally until the durable verdict appears
 """
 
 
