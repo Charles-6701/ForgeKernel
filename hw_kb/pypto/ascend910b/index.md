@@ -28,6 +28,12 @@ hardware before a recipe is marked Verified.
 | --- | --- | --- | --- |
 | [带保护区的有效区域回写与互斥所有者访问计数 / Guarded valid-region writeback and disjoint-owner visit counters](valid_region_contract.md) | 已验证 / Verified — `PROBE PASS max_diff=1.1920928955078125e-07`，job `1794845325`（第 2 轮 / round 2） | `notes/valid_region_contract.py` | 合成连续 rank-2 FP32、不完整有效范围、互斥非原子 visits、保护区、输入保持和重复分配语义；不声明物理分配或速度。 / Synthetic contiguous rank-2 FP32, partial valid extents, disjoint non-atomic visits, guards, input preservation and repeated-allocation semantics; no physical allocation or speed claim. |
 
+## 实验观察 / Experimental observations
+
+- [分块 launch、连续切片与 profiler 计时](tiling_and_profiling_observations.md)
+  记录 A2 的实测范围和待验证项。此类观察不能直接作为通用 Verified recipe 使用。
+- 应用条目后若出现退化，遵循 [人工审核与矫正规则](../../README.md#regression-review--退化复核)。
+
 ## 当前缺口 / Current gaps
 
 Physical UB/L1 allocation, overlap, stalls and performance are outside this
