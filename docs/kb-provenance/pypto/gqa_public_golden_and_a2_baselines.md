@@ -86,3 +86,21 @@ It retains R4's tile, precision and launch count. Check the independent
 causal boundary, official scout and both timing orders, then run the 20-case
 gate before promoting the candidate.
 [R6 配对与晋升判定 / R6 pairing and gate](https://github.com/Charles-6701/forgekernel-ascend-repro/blob/702b4fc7c9e13e1b8a7d5f16a63ee8d03d412187/experiments/910b/20261123-gqa-teacher-student/round-06/RESULT.md)
+
+## 全量同口径补测 / Matched full-coverage follow-up
+
+2026-11-24 在同一 A2 上按用例用独立进程先运行 PyTorch golden，随后运行 R4。
+两者使用同一计时入口、官方输入分布和预热采样设置。全量几何平均为
+PyTorch **1.5010 ms** 与 R4 **230.4105 ms**，端到端延迟比 **153.51×**。
+`gqa_8` 的配对数值为 **8.2383 ms** 与 **2821.5626 ms**。此次覆盖 20 例，
+结果适用于该固定执行顺序和已记录的环境。
+
+On 2026-11-24 both implementations were timed on the same A2 in separate
+per-case processes, golden first and R4 second, using the same timing
+entry point, public input distribution, warmups and sampling. The 20-case
+geometric means are **1.5010 ms** for PyTorch and **230.4105 ms** for R4,
+an end-to-end latency ratio of **153.51×**. The matched `gqa_8` values
+are **8.2383 ms** and **2821.5626 ms**. The result applies to the recorded
+environment and fixed execution order.
+
+[全量配对样本 / Full paired samples](https://github.com/Charles-6701/forgekernel-ascend-repro/blob/d36e061aaa5af45d54f437c105834638b2058307/experiments/910b/20261123-gqa-teacher-student/pytorch-reference/full-paired-result.json)
