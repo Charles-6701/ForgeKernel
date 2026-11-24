@@ -34,3 +34,36 @@
 
 应用本条经验后若出现退化，按 [人工审核与矫正规则](../../README.md#regression-review--退化复核)
 处理。审核时优先核对实际触发的分支、shape 覆盖、launch 数和计时窗口。
+
+## 行块打包与逻辑索引 / Row packing and logical indices
+
+多个逻辑行共享同一个不展开的输入操作数时，可将物理连续的行一次搬入本地 tile。
+源地址、掩码或其他逐行元数据、以及输出逆映射应统一用同一逻辑行标识推导。
+仅在完整行组、边界和 stride 均可证明的路径使用整组搬运。用独立的行标签验证
+映射，用可枚举的边界输入验证元数据扩展。连续性和逻辑等价是编译前提，
+生成的指令与同步计时仍需按目标机和 shape 确认。
+
+When several logical rows share an unexpanded input operand, load physically
+contiguous rows together into a local tile. Derive source addresses, masks or
+other row metadata, and inverse output mapping from the same logical row
+identity. Use whole-group loads where row coverage, bounds and strides are
+known. Validate the mapping with independent row tags and metadata broadcast
+with enumerable boundary inputs. Check lowering and synchronized timing on
+the target device and shape.
+
+## 同步墙钟对照 / Synchronized wall-clock comparisons
+
+以减少 launch 或缩短 profiler 任务区间为假设时，同步墙钟仍需独立验证。
+在相同设备、输入、预热和采样口径下比较整个调用，计入调用内张量操作与设备
+同步等待。保留原始区间、launch 数和墙钟记录。反向调整候选与基线的执行顺序，
+用未改动路径估计波动。单次固定顺序比较仅覆盖其记录的形状和执行顺序。
+
+When the hypothesis is fewer launches or shorter profiler task intervals,
+validate synchronized wall time separately. Compare the complete call on
+the same device with matched inputs, warmups and samples, including tensor
+operations inside the call and device synchronization. Keep raw intervals,
+launch counts and wall samples. Reverse the candidate/baseline execution
+order and use unchanged paths to estimate drift. A fixed-order comparison
+covers the recorded shape and order.
+
+[公开数学契约与计时来源 / Public mathematical contract and timing provenance](../../../docs/kb-provenance/pypto/gqa_public_golden_and_a2_baselines.md)
